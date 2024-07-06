@@ -19,20 +19,8 @@ class Database:
                 scene_id INTEGER,
                 animal_count INTEGER,
                 unique_animal_count INTEGER,
-                timestamp TEXT
-            )
-        ''')
-        self.cursor.execute('''
-            CREATE TABLE IF NOT EXISTS bounding_boxes (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                photo_id INTEGER,
-                x1 INTEGER,
-                y1 INTEGER,
-                x2 INTEGER,
-                y2 INTEGER,
-                animal_id TEXT,
-                category TEXT,
-                FOREIGN KEY (photo_id) REFERENCES photos (id)
+                timestamp TEXT,
+                bbox_string TEXT
             )
         ''')
         self.cursor.execute('''
@@ -45,7 +33,7 @@ class Database:
 
     def get_photo(self, photo_id):
         self.cursor.execute("""
-            SELECT id, path, folder, upload_date, processed, scene_id, animal_count, unique_animal_count, timestamp
+            SELECT id, path, folder, upload_date, processed, scene_id, animal_count, unique_animal_count, timestamp, bbox_string
             FROM photos 
             WHERE id = ?
         """, (photo_id,))
@@ -60,6 +48,14 @@ class Database:
         ''', (path, folder, upload_date, timestamp))
         self.conn.commit()
         return self.cursor.lastrowid
+
+    def update_photo_processing(self, photo_id, scene_id, animal_count, unique_animal_count, bbox_string, timestamp):
+        self.cursor.execute('''
+            UPDATE photos
+            SET processed = 1, scene_id = ?, animal_count = ?, unique_animal_count = ?, bbox_string = ?, timestamp = ?
+            WHERE id = ?
+        ''', (scene_id, animal_count, unique_animal_count, bbox_string, timestamp.strftime("%Y-%m-%d %H:%M:%S"), photo_id))
+        self.conn.commit()
 
     def get_unique_folders(self):
         self.cursor.execute("SELECT DISTINCT folder FROM photos")
@@ -80,19 +76,6 @@ class Database:
                 ORDER BY timestamp DESC
             """)
         return self.cursor.fetchall()
-
-    def update_photo_processing(self, photo_id, scene_id, animal_count, unique_animal_count, bounding_boxes, timestamp):
-        self.cursor.execute('''
-            UPDATE photos
-            SET processed = 1, scene_id = ?, animal_count = ?, unique_animal_count = ?, timestamp = ?
-            WHERE id = ?
-        ''', (scene_id, animal_count, unique_animal_count, timestamp.strftime("%Y-%m-%d %H:%M:%S"), photo_id))
-        for bbox in bounding_boxes:
-            self.cursor.execute('''
-                INSERT INTO bounding_boxes (photo_id, x1, y1, x2, y2, animal_id, category)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            ''', (photo_id, *bbox))
-        self.conn.commit()
 
     def get_bounding_boxes(self, photo_id):
         self.cursor.execute('SELECT x1, y1, x2, y2, animal_id, category FROM bounding_boxes WHERE photo_id = ?', (photo_id,))
@@ -123,6 +106,32 @@ class Database:
         self.cursor.execute('INSERT INTO scenes (unique_animal_count) VALUES (0)')
         self.conn.commit()
         return self.cursor.lastrowid
+    
+    def get_timestamps_for_folder(self, folder):
+        self.cursor.execute("""
+            SELECT timestamp
+            FROM photos
+            WHERE folder = ?
+            ORDER BY timestamp
+        """, (folder,))
+        return [datetime.strptime(row[0], '%Y-%m-%d %H:%M:%S') for row in self.cursor.fetchall()]
+
+    def get_photos_for_map(self, folder, selected_datetime):
+        self.cursor.execute("""
+            SELECT folder, animal_count, unique_animal_count
+            FROM photos
+            WHERE folder = ? AND timestamp <= ?
+            ORDER BY timestamp DESC
+            LIMIT 1
+        """, (folder, selected_datetime.strftime('%Y-%m-%d %H:%M:%S')))
+        result = self.cursor.fetchone()
+        if result:
+            return [{
+                'folder': result[0],
+                'animal_count': result[1],
+                'unique_animal_count': result[2]
+            }]
+        return []
 
     def __del__(self):
         self.conn.close()

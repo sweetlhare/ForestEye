@@ -1,28 +1,29 @@
+import os
+from datetime import datetime, timedelta
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
                              QTableWidget, QTableWidgetItem, QFileDialog, QProgressDialog,
                              QComboBox, QLabel, QSpinBox)
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QPixmap
-import os
 from PIL import Image
 from PIL.ExifTags import TAGS
 from navigation_menu import NavigationMenu
-from ultralytics import YOLO
-from datetime import datetime, timedelta
-import uuid
+import cv2
+import numpy as np
+import onnxruntime
 
 class PhotoBankPage(QWidget):
     def __init__(self, db, show_processing_page):
         super().__init__()
         self.db = db
         self.show_processing_page = show_processing_page
-        self.model = YOLO('yolov8n.pt')
         self.items_per_page = 15
         self.init_ui()
-        self.animal_ids = {}
         self.current_page = 1
         self.total_pages = 1
         self.current_folder = None
+        self.onnx_session = onnxruntime.InferenceSession('last-2.onnx', providers=['CPUExecutionProvider'])
+        self.labels = self.load_labels('labels.txt')
 
     def init_ui(self):
         layout = QVBoxLayout()
@@ -78,6 +79,10 @@ class PhotoBankPage(QWidget):
         self.current_scene_id = None
         self.last_photo_time = None
 
+    def load_labels(self, labels_path):
+        with open(labels_path, 'r') as f:
+            return [line.strip() for line in f.readlines()]
+        
     def load_folders(self):
         folders = self.db.get_unique_folders()
         self.folder_combo.clear()
@@ -108,7 +113,6 @@ class PhotoBankPage(QWidget):
             thumbnail_item.setData(Qt.ItemDataRole.DecorationRole, pixmap)
             self.photo_table.setItem(row, 0, thumbnail_item)
             
-            # Используем timestamp вместо upload_date
             self.photo_table.setItem(row, 1, QTableWidgetItem(timestamp if timestamp else "Нет данных"))
             self.photo_table.setItem(row, 2, QTableWidgetItem(folder))
             self.photo_table.setItem(row, 3, QTableWidgetItem("Да" if processed else "Нет"))
@@ -141,71 +145,134 @@ class PhotoBankPage(QWidget):
         folder_name = QFileDialog.getExistingDirectory(self, "Выберите папку с фотографиями")
         if folder_name:
             image_files = [f for f in os.listdir(folder_name) if f.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp'))]
-            image_files.sort(key=lambda x: os.path.getmtime(os.path.join(folder_name, x)))  # Сортировка по времени изменения
+            image_files.sort(key=lambda x: self.get_photo_timestamp(os.path.join(folder_name, x)))
             
             progress = QProgressDialog("Загрузка и обработка фотографий...", "Отмена", 0, len(image_files), self)
             progress.setWindowModality(Qt.WindowModality.WindowModal)
             progress.setWindowTitle("Прогресс загрузки и обработки")
             
-            self.current_scene_id = None  # Сбрасываем ID сцены перед обработкой новой папки
-            self.last_photo_time = None
+            scenes = []
+            current_scene = None
+            last_photo_time = None
             
             for i, image_file in enumerate(image_files):
                 if progress.wasCanceled():
                     break
                 
                 file_path = os.path.join(folder_name, image_file)
-                self.process_single_photo(file_path)
+                timestamp = self.get_photo_timestamp(file_path)
+                
+                if current_scene is None or self.is_new_scene(timestamp, last_photo_time):
+                    if current_scene is not None:
+                        scenes.append(current_scene)
+                    current_scene = {
+                        'photos': [],
+                        'animal_ids': set(),
+                        'max_unique_animals': 0,
+                        'bboxes': []  # Добавляем список для хранения всех bounding boxes сцены
+                    }
+                
+                results = self.process_image_with_yolo(file_path)
+                
+                bbox_strings = []
+                current_photo_animal_ids = set()
+                for detection in results:
+                    x1, y1, x2, y2 = map(int, detection['bbox'])
+                    category = detection['class']
+                    animal_id = self.get_or_create_animal_id(current_scene['bboxes'], current_scene['animal_ids'], (x1, y1, x2, y2))
+                    bbox_strings.append(f"{x1},{y1},{x2},{y2},{animal_id},{category}")
+                    current_photo_animal_ids.add(animal_id)
+                    current_scene['bboxes'].append((x1, y1, x2, y2))
+                
+                bbox_string = ";".join(bbox_strings)
+                
+                animal_count = len(bbox_strings)
+                unique_animal_count = len(current_photo_animal_ids)
+                current_scene['max_unique_animals'] = max(current_scene['max_unique_animals'], unique_animal_count)
+                
+                current_scene['photos'].append({
+                    'path': file_path,
+                    'timestamp': timestamp,
+                    'animal_count': animal_count,
+                    'unique_animal_count': unique_animal_count,
+                    'bbox_string': bbox_string
+                })
+                
+                last_photo_time = timestamp
                 progress.setValue(i + 1)
             
-            progress.setValue(len(image_files))
+            if current_scene is not None:
+                scenes.append(current_scene)
+            
+            progress.setLabelText("Сохранение данных в базу...")
+            progress.setRange(0, len(scenes))
+            progress.setValue(0)
+
+            unique_animal_counts = []
+            for i, scene in enumerate(scenes):
+                unique_animal_count_ = 0
+                for photo in scene['photos']:
+                    unique_animal_count_ = max(unique_animal_count_, photo['unique_animal_count'])
+                unique_animal_counts.append(unique_animal_count_)
+
+            for i, scene in enumerate(scenes):
+                scene_id = self.db.create_new_scene()
+                for photo in scene['photos']:
+                    photo_id = self.db.add_photo(photo['path'], photo['timestamp'])
+                    self.db.update_photo_processing(
+                        photo_id, 
+                        scene_id, 
+                        photo['animal_count'], 
+                        unique_animal_counts[i], 
+                        photo['bbox_string'], 
+                        photo['timestamp']
+                    )
+                self.db.update_scene_unique_count(scene_id, unique_animal_counts[i])
+                progress.setValue(i + 1)
+            
+            progress.setValue(len(scenes))
             self.load_folders()
             self.load_photos()
 
-    def process_single_photo(self, file_path):
-        timestamp = self.get_photo_timestamp(file_path)
-        photo_id = self.db.add_photo(file_path, timestamp)
+    def process_image_with_yolo(self, image_path):
+        image = cv2.imread(image_path)
+        original_height, original_width = image.shape[:2]
+        input_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        input_image = cv2.resize(input_image, (1024, 1024))
+        input_image = input_image.astype(np.float32) / 255.0
+        input_image = np.transpose(input_image, (2, 0, 1))
+        input_image = np.expand_dims(input_image, axis=0)
         
-        if self.current_scene_id is None or self.is_new_scene(timestamp):
-            self.current_scene_id = self.db.create_new_scene()
-            self.animal_ids = {}
+        input_name = self.onnx_session.get_inputs()[0].name
+        output_name = self.onnx_session.get_outputs()[0].name
         
-        results = self.model(file_path)
+        outputs = self.onnx_session.run([output_name], {input_name: input_image})
         
-        bounding_boxes = []
-        for box in results[0].boxes:
-            x1, y1, x2, y2 = box.xyxy[0].tolist()
-            category = results[0].names[int(box.cls)]
-            animal_id = self.get_or_create_animal_id((int(x1), int(y1), int(x2), int(y2)))
-            bounding_boxes.append((int(x1), int(y1), int(x2), int(y2), animal_id, category))
+        detections = outputs[0][0]
         
-        animal_count = len(bounding_boxes)
-        unique_animal_count = len(set(animal_id for _, _, _, _, animal_id, _ in bounding_boxes))
+        confidence_threshold = 0.5
+        filtered_detections = detections[detections[:, 4] > confidence_threshold]
         
-        self.db.update_photo_processing(photo_id, self.current_scene_id, animal_count, unique_animal_count, bounding_boxes, timestamp)
+        results = []
+        for detection in filtered_detections:
+            class_id = int(detection[5])
+            confidence = detection[4]
+            bbox = detection[:4]
+            
+            # Преобразование координат bbox обратно к оригинальному размеру изображения
+            x1, y1, x2, y2 = bbox
+            x1 = int(x1 * original_width / 1024)
+            y1 = int(y1 * original_height / 1024)
+            x2 = int(x2 * original_width / 1024)
+            y2 = int(y2 * original_height / 1024)
+            
+            results.append({
+                'class': self.labels[class_id],
+                'confidence': float(confidence),
+                'bbox': [x1, y1, x2, y2]
+            })
         
-        self.last_photo_time = timestamp
-    
-    def get_or_create_animal_id(self, bbox):
-        # This is a simplistic approach. In a real scenario, you'd use more sophisticated
-        # tracking or feature matching to determine if it's the same animal.
-        for existing_bbox, animal_id in self.animal_ids.items():
-            if self.is_same_animal(existing_bbox, bbox):
-                return animal_id
-        
-        new_id = str(uuid.uuid4())
-        self.animal_ids[bbox] = new_id
-        return new_id
-    
-    def is_same_animal(self, bbox1, bbox2):
-        # This is a very basic comparison. In reality, you'd use more advanced
-        # techniques like feature matching or tracking algorithms.
-        x1, y1, x2, y2 = bbox1
-        x3, y3, x4, y4 = bbox2
-        center1 = ((x1 + x2) / 2, (y1 + y2) / 2)
-        center2 = ((x3 + x4) / 2, (y3 + y4) / 2)
-        distance = ((center1[0] - center2[0])**2 + (center1[1] - center2[1])**2)**0.5
-        return distance < 50  # Arbitrary threshold, adjust as needed
+        return results
 
     def get_photo_timestamp(self, file_path):
         try:
@@ -226,11 +293,28 @@ class PhotoBankPage(QWidget):
         
         return datetime.fromtimestamp(os.path.getmtime(file_path))
 
-    def is_new_scene(self, current_time):
-        if self.last_photo_time is None:
+    def is_new_scene(self, current_time, last_photo_time):
+        if last_photo_time is None:
             return True
-        time_difference = current_time - self.last_photo_time
-        return time_difference > timedelta(minutes=30)  # Adjust this threshold as needed
+        time_difference = current_time - last_photo_time
+        return time_difference > timedelta(minutes=30)
+
+    def get_or_create_animal_id(self, scene_bboxes, animal_ids, new_bbox):
+        for i, existing_bbox in enumerate(scene_bboxes):
+            if self.is_same_animal(existing_bbox, new_bbox):
+                return f"animal_{i+1}"
+        
+        new_id = f"animal_{len(animal_ids) + 1}"
+        animal_ids.add(new_id)
+        return new_id
+
+    def is_same_animal(self, bbox1, bbox2):
+        x1, y1, x2, y2 = bbox1
+        x3, y3, x4, y4 = bbox2
+        center1 = ((x1 + x2) / 2, (y1 + y2) / 2)
+        center2 = ((x3 + x4) / 2, (y3 + y4) / 2)
+        distance = ((center1[0] - center2[0])**2 + (center1[1] - center2[1])**2)**0.5
+        return distance < 50
 
     def open_photo(self, row, column):
         start_idx = (self.current_page - 1) * self.items_per_page

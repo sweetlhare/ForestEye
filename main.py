@@ -23,7 +23,7 @@ class MainWindow(QMainWindow):
         # Создание страниц
         self.photo_bank_page = PhotoBankPage(self.db, self.show_processing_page)
         self.photo_processing_page = PhotoProcessingPage(self.db, self.show_photo_bank_page)
-        self.map_page = MapPage()  # Новая страница с картой
+        self.map_page = MapPage(self.db)  # Новая страница с картой
 
         # Добавление страниц в стек
         self.stacked_widget.addWidget(self.photo_bank_page)

@@ -1,5 +1,5 @@
 import os
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QScrollArea
 from PyQt6.QtGui import QPixmap, QPainter, QPen, QColor, QFont
 from PyQt6.QtCore import Qt, QRect
 from PIL import Image
@@ -24,8 +24,12 @@ class PhotoProcessingPage(QWidget):
         self.photo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.photo_label)
 
+        self.scroll_area = QScrollArea()
         self.info_label = QLabel()
-        layout.addWidget(self.info_label)
+        self.info_label.setWordWrap(True)
+        self.scroll_area.setWidget(self.info_label)
+        self.scroll_area.setWidgetResizable(True)
+        layout.addWidget(self.scroll_area)
 
         button_layout = QHBoxLayout()
         self.back_button = QPushButton("Назад")
@@ -40,10 +44,25 @@ class PhotoProcessingPage(QWidget):
         self.current_photo_id = photo_id
         photo_data = self.db.get_photo(photo_id)
         if photo_data:
-            self.original_pixmap = QPixmap(photo_data[1])  # Assuming path is at index 1
-            self.bboxes = self.db.get_bounding_boxes(photo_id)
+            self.original_pixmap = QPixmap(photo_data[1])  # path is at index 1
+            self.bboxes = self.parse_bbox_string(photo_data[9])  # bbox_string is at index 9
             self.display_photo(self.original_pixmap)
             self.update_info_label(photo_data)
+        else:
+            self.info_label.setText("Фото не найдено")
+            self.photo_label.clear()
+
+    def parse_bbox_string(self, bbox_string):
+        if not bbox_string:
+            return []
+        bboxes = []
+        for bbox in bbox_string.split(";"):
+            parts = bbox.split(",")
+            if len(parts) >= 6:
+                x1, y1, x2, y2 = map(int, parts[:4])
+                animal_id, category = parts[4], parts[5]
+                bboxes.append((x1, y1, x2, y2, animal_id, category))
+        return bboxes
 
     def display_photo(self, pixmap):
         scaled_width = int(self.width() * 0.8)
@@ -64,12 +83,9 @@ class PhotoProcessingPage(QWidget):
             
             for bbox in self.bboxes:
                 x1, y1, x2, y2, animal_id, category = bbox
-                x1 = int(x1 * scale_x)
-                y1 = int(y1 * scale_y)
-                x2 = int(x2 * scale_x)
-                y2 = int(y2 * scale_y)
+                x1, y1, x2, y2 = map(int, [x1 * scale_x, y1 * scale_y, x2 * scale_x, y2 * scale_y])
                 painter.drawRect(QRect(x1, y1, x2 - x1, y2 - y1))
-                painter.drawText(x1, y1 - 5, category)
+                painter.drawText(x1, y1 - 5, f"{category} {animal_id}")
             
             painter.end()
             self.photo_label.setPixmap(drawing_pixmap)
@@ -78,21 +94,27 @@ class PhotoProcessingPage(QWidget):
 
     def update_info_label(self, photo_data):
         if photo_data:
-            photo_id, path, folder, upload_date, processed, scene_id, animal_count, unique_animal_count, timestamp = photo_data
-            info_text = f"ID фото: {photo_id}\n"
-            info_text += f"Путь: {path}\n"
-            info_text += f"Папка: {folder}\n"
-            info_text += f"Дата загрузки: {upload_date}\n"
-            info_text += f"Обработано: {'Да' if processed else 'Нет'}\n"
-            info_text += f"ID сцены: {scene_id}\n"
-            info_text += f"Количество животных: {animal_count}\n"
-            info_text += f"Уникальных животных: {unique_animal_count}\n"
-            info_text += f"Временная метка: {timestamp}"
-            self.info_label.setText(info_text)
+            id, path, folder, upload_date, processed, scene_id, animal_count, unique_animal_count, timestamp, bbox_string = photo_data
+            
+            info_text = f"<b>ID фото:</b> {id}<br>"
+            info_text += f"<b>Путь:</b> {path}<br>"
+            info_text += f"<b>Папка:</b> {folder}<br>"
+            info_text += f"<b>Дата загрузки:</b> {upload_date}<br>"
+            info_text += f"<b>Обработано:</b> {'Да' if processed else 'Нет'}<br>"
+            info_text += f"<b>ID сцены:</b> {scene_id}<br>"
+            info_text += f"<b>Количество животных:</b> {animal_count}<br>"
+            info_text += f"<b>Уникальных животных:</b> {unique_animal_count}<br>"
+            info_text += f"<b>Временная метка:</b> {timestamp}<br>"
+            info_text += f"<b>Bounding Boxes:</b><br>"
+            
+            if bbox_string:
+                for bbox in bbox_string.split(";"):
+                    x1, y1, x2, y2, animal_id, category = bbox.split(",")
+                    info_text += f"  {category} {animal_id}: ({x1}, {y1}, {x2}, {y2})<br>"
+            else:
+                info_text += "  Нет данных о bounding boxes<br>"
 
-            # Удалите эти две строки, так как фото уже отображается в методе display_photo
-            # pixmap = QPixmap(path)
-            # self.photo_label.setPixmap(pixmap.scaled(400, 400, Qt.AspectRatioMode.KeepAspectRatio))
+            self.info_label.setText(info_text)
         else:
             self.info_label.setText("Фото не найдено")
             self.photo_label.clear()
