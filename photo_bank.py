@@ -2,7 +2,7 @@ import os
 from datetime import datetime, timedelta
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
                              QTableWidget, QTableWidgetItem, QFileDialog, QProgressDialog,
-                             QComboBox, QLabel, QSpinBox)
+                             QComboBox, QLabel, QSpinBox, QMessageBox, QHeaderView, QSizePolicy)
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QPixmap
 from PIL import Image
@@ -11,6 +11,9 @@ from navigation_menu import NavigationMenu
 import cv2
 import numpy as np
 import onnxruntime
+import csv
+import openpyxl
+import time
 
 class PhotoBankPage(QWidget):
     def __init__(self, db, show_processing_page):
@@ -22,62 +25,103 @@ class PhotoBankPage(QWidget):
         self.current_page = 1
         self.total_pages = 1
         self.current_folder = None
-        self.onnx_session = onnxruntime.InferenceSession('last-2.onnx', providers=['CPUExecutionProvider'])
+        self.onnx_session = onnxruntime.InferenceSession('models/best.onnx', providers=['CPUExecutionProvider'])
         self.labels = self.load_labels('labels.txt')
 
     def init_ui(self):
-        layout = QVBoxLayout()
+        main_layout = QVBoxLayout()
+        main_layout.setContentsMargins(20, 20, 20, 20)  # Отступы от края окна
+        main_layout.setSpacing(15)  # Увеличенное расстояние между элементами
 
         self.nav_menu = NavigationMenu(self)
-        layout.addWidget(self.nav_menu)
+        main_layout.addWidget(self.nav_menu)
 
-        # Add folder selection combo box
+        # Folder selection
         folder_layout = QHBoxLayout()
-        folder_label = QLabel("Выберите папку:")
+        folder_layout.setContentsMargins(0, 10, 0, 10)  # Отступы сверху и снизу
         self.folder_combo = QComboBox()
+        self.folder_combo.setStyleSheet("""
+            QComboBox {
+                font-size: 16px;
+                padding: 5px;
+                min-width: 500px;
+            }
+        """)
         self.folder_combo.currentTextChanged.connect(self.on_folder_changed)
-        folder_layout.addWidget(folder_label)
         folder_layout.addWidget(self.folder_combo)
-        layout.addLayout(folder_layout)
+        folder_layout.addStretch(1)  # Добавляем растягивающийся элемент справа
+        main_layout.addLayout(folder_layout)
 
         self.photo_table = QTableWidget()
         self.photo_table.setColumnCount(7)
         self.photo_table.setHorizontalHeaderLabels(["Фото", "Дата загрузки", "Папка", "Обработано", "Кол-во животных", "Уникальных животных", "ID сцены"])
         self.photo_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.photo_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        layout.addWidget(self.photo_table)
+        self.photo_table.horizontalHeader().setStretchLastSection(True)
+        self.photo_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        main_layout.addWidget(self.photo_table)
 
-        # Add pagination controls
+        # Pagination controls
         pagination_layout = QHBoxLayout()
+        pagination_layout.setContentsMargins(0, 10, 0, 10)  # Отступы сверху и снизу
         self.prev_button = QPushButton("Предыдущая")
-        self.prev_button.clicked.connect(self.prev_page)
         self.next_button = QPushButton("Следующая")
-        self.next_button.clicked.connect(self.next_page)
         self.page_label = QLabel()
+        self.page_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.page_label.setStyleSheet("""
+            QLabel {
+                font-size: 18px;
+                font-weight: bold;
+                min-width: 100px;
+            }
+        """)
         self.page_spin = QSpinBox()
+        self.page_spin.setStyleSheet("""
+            QSpinBox {
+                font-size: 16px;
+                padding: 5px;
+                min-width: 70px;
+            }
+        """)
         self.page_spin.setMinimum(1)
         self.page_spin.valueChanged.connect(self.on_page_changed)
+        
         pagination_layout.addWidget(self.prev_button)
+        pagination_layout.addStretch(1)
         pagination_layout.addWidget(self.page_label)
+        pagination_layout.addStretch(1)
         pagination_layout.addWidget(self.page_spin)
+        pagination_layout.addStretch(1)
         pagination_layout.addWidget(self.next_button)
-        layout.addLayout(pagination_layout)
+        
+        main_layout.addLayout(pagination_layout)
 
         button_layout = QHBoxLayout()
+        button_layout.setContentsMargins(0, 10, 0, 0)  # Отступ сверху
         self.upload_folder_button = QPushButton("Загрузить папку")
+        self.export_csv_button = QPushButton("Выгрузить в CSV")
+        self.export_xlsx_button = QPushButton("Выгрузить в XLSX")
         button_layout.addWidget(self.upload_folder_button)
-        layout.addLayout(button_layout)
+        button_layout.addWidget(self.export_csv_button)
+        button_layout.addWidget(self.export_xlsx_button)
+        main_layout.addLayout(button_layout)
 
-        self.setLayout(layout)
+        self.setLayout(main_layout)
 
         self.upload_folder_button.clicked.connect(self.upload_folder)
+        self.export_csv_button.clicked.connect(self.export_csv)
+        self.export_xlsx_button.clicked.connect(self.export_xlsx)
         self.photo_table.cellDoubleClicked.connect(self.open_photo)
 
         self.load_folders()
         self.load_photos()
 
-        self.current_scene_id = None
-        self.last_photo_time = None
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.photo_table.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        main_layout.setStretch(2, 1)  # Индекс 2 соответствует photo_table в layout
+
+        self.prev_button.clicked.connect(self.prev_page)
+        self.next_button.clicked.connect(self.next_page)
 
     def load_labels(self, labels_path):
         with open(labels_path, 'r') as f:
@@ -121,7 +165,7 @@ class PhotoBankPage(QWidget):
             self.photo_table.setItem(row, 6, QTableWidgetItem(str(scene_id) if scene_id is not None else ""))
 
     def update_pagination_controls(self):
-        self.page_label.setText(f"Страница {self.current_page} из {self.total_pages}")
+        self.page_label.setText(f"{self.current_page} из {self.total_pages}")
         self.page_spin.setValue(self.current_page)
         self.prev_button.setEnabled(self.current_page > 1)
         self.next_button.setEnabled(self.current_page < self.total_pages)
@@ -144,6 +188,7 @@ class PhotoBankPage(QWidget):
     def upload_folder(self):
         folder_name = QFileDialog.getExistingDirectory(self, "Выберите папку с фотографиями")
         if folder_name:
+            start_time = time.time()
             image_files = [f for f in os.listdir(folder_name) if f.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp'))]
             image_files.sort(key=lambda x: self.get_photo_timestamp(os.path.join(folder_name, x)))
             
@@ -154,6 +199,10 @@ class PhotoBankPage(QWidget):
             scenes = []
             current_scene = None
             last_photo_time = None
+            last_class = None  # Добавляем для отслеживания последнего класса детекции
+            last_detection_time = None  # Добавляем для отслеживания времени последней детекции
+            
+            processed_images = 0
             
             for i, image_file in enumerate(image_files):
                 if progress.wasCanceled():
@@ -179,10 +228,18 @@ class PhotoBankPage(QWidget):
                 for detection in results:
                     x1, y1, x2, y2 = map(int, detection['bbox'])
                     category = detection['class']
+                    
+                    # Фильтрация выбросов
+                    if last_class is not None and (timestamp - last_detection_time) < timedelta(seconds=30):
+                        category = last_class
+                    
                     animal_id = self.get_or_create_animal_id(current_scene['bboxes'], current_scene['animal_ids'], (x1, y1, x2, y2))
                     bbox_strings.append(f"{x1},{y1},{x2},{y2},{animal_id},{category}")
                     current_photo_animal_ids.add(animal_id)
                     current_scene['bboxes'].append((x1, y1, x2, y2))
+                    
+                    last_class = category  # Обновляем последний класс детекции
+                    last_detection_time = timestamp  # Обновляем время последней детекции
                 
                 bbox_string = ";".join(bbox_strings)
                 
@@ -199,6 +256,7 @@ class PhotoBankPage(QWidget):
                 })
                 
                 last_photo_time = timestamp
+                processed_images += 1
                 progress.setValue(i + 1)
             
             if current_scene is not None:
@@ -231,8 +289,19 @@ class PhotoBankPage(QWidget):
                 progress.setValue(i + 1)
             
             progress.setValue(len(scenes))
-            self.load_folders()
+            self.load_folders() 
             self.load_photos()
+
+            end_time = time.time()
+            processing_time = end_time - start_time
+
+            # Показываем всплывающее окно с информацией о времени обработки и количестве обработанных изображений
+            QMessageBox.information(
+                self,
+                "Обработка завершена",
+                f"Обработано изображений: {processed_images}\n"
+                f"Затраченное время: {processing_time:.2f} секунд"
+            )
 
     def process_image_with_yolo(self, image_path):
         image = cv2.imread(image_path)
@@ -325,3 +394,47 @@ class PhotoBankPage(QWidget):
         super().showEvent(event)
         self.load_folders()
         self.load_photos()
+
+    def export_csv(self):
+        self.export_data('csv')
+
+    def export_xlsx(self):
+        self.export_data('xlsx')
+
+    def export_data(self, format):
+        folder = self.current_folder if self.current_folder != "Все папки" else None
+        data = self.db.get_export_data(folder)
+
+        if format == 'csv':
+            file_path, _ = QFileDialog.getSaveFileName(self, "Сохранить CSV", "", "CSV Files (*.csv)")
+            if file_path:
+                with open(file_path, 'w', newline='') as csvfile:
+                    writer = csv.writer(csvfile)
+                    writer.writerow(['folder_name', 'class', 'date_registration_start', 'date_registration_end', 'count'])
+                    for row in data:
+                        writer.writerow([
+                            int(row[0].split('/')[-1]),
+                            row[1],
+                            row[2].strftime('%Y-%m-%d %H:%M:%S'),
+                            row[3].strftime('%Y-%m-%d %H:%M:%S'),
+                            row[4]
+                        ])
+        elif format == 'xlsx':
+            file_path, _ = QFileDialog.getSaveFileName(self, "Сохранить XLSX", "", "Excel Files (*.xlsx)")
+            if file_path:
+                wb = openpyxl.Workbook()
+                ws = wb.active
+                ws.append(['folder_name', 'class', 'date_registration_start', 'date_registration_end', 'count'])
+                for row in data:
+                    ws.append([
+                        row[0],
+                        row[1],
+                        row[2].strftime('%Y-%m-%d %H:%M:%S'),
+                        row[3].strftime('%Y-%m-%d %H:%M:%S'),
+                        row[4]
+                    ])
+                wb.save(file_path)
+
+        if file_path:
+            QMessageBox.information(self, "Экспорт завершен", f"Данные успешно экспортированы в {file_path}")
+

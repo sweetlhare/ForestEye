@@ -65,45 +65,91 @@ class MapPage(QWidget):
         super().__init__(parent)
         self.db = db
         self.layout = QVBoxLayout(self)
+        self.layout.setContentsMargins(20, 20, 20, 20)  # Добавляем отступы
+        self.layout.setSpacing(15)  # Увеличиваем расстояние между элементами
 
         # Navigation menu
         self.nav_menu = NavigationMenu(self)
         self.layout.addWidget(self.nav_menu)
 
+        # Создаем контейнер для элементов управления
+        self.controls_widget = QWidget()
+        self.controls_layout = QVBoxLayout(self.controls_widget)
+        self.controls_layout.setContentsMargins(0, 10, 0, 10)  # Добавляем отступы сверху и снизу
+        
         # Folder selection
         self.folder_layout = QHBoxLayout()
-        self.folder_label = QLabel("Folder:")
         self.folder_combo = QComboBox()
+        self.folder_combo.setStyleSheet("""
+            QComboBox {
+                font-size: 16px;
+                padding: 5px;
+                min-width: 200px;
+            }
+        """)
         self.folder_combo.currentTextChanged.connect(self.update_date_time_options)
-        self.folder_layout.addWidget(self.folder_label)
         self.folder_layout.addWidget(self.folder_combo)
-        self.layout.addLayout(self.folder_layout)
+        self.folder_layout.addStretch(1)  # Добавляем растягивающийся элемент справа
+        self.controls_layout.addLayout(self.folder_layout)
 
         # Date and Time selection
         self.date_time_layout = QHBoxLayout()
-        self.date_label = QLabel("Date:")
+        self.date_label = QLabel("Дата:")
+        self.date_label.setStyleSheet("font-size: 16px;")
         self.date_combo = QComboBox()
-        self.time_label = QLabel("Time:")
+        self.date_combo.setStyleSheet("""
+            QComboBox {
+                font-size: 16px;
+                padding: 5px;
+                min-width: 150px;
+            }
+        """)
+        self.time_label = QLabel("Время:")
+        self.time_label.setStyleSheet("font-size: 16px;")
         self.time_combo = QComboBox()
-        self.update_button = QPushButton("Update Map")
+        self.time_combo.setStyleSheet("""
+            QComboBox {
+                font-size: 16px;
+                padding: 5px;
+                min-width: 100px;
+            }
+        """)
+        self.update_button = QPushButton("Обновить карту")
+        self.update_button.setStyleSheet("""
+            QPushButton {
+                background-color: #525252;
+                color: white;
+                border: none;
+                padding: 10px 20px;
+                text-align: center;
+                text-decoration: none;
+                font-size: 16px;
+                border-radius: 8px;
+            }
+            QPushButton:hover {
+                background-color: #45a049;
+            }
+        """)
         self.update_button.clicked.connect(self.update_map)
         self.date_time_layout.addWidget(self.date_label)
         self.date_time_layout.addWidget(self.date_combo)
         self.date_time_layout.addWidget(self.time_label)
         self.date_time_layout.addWidget(self.time_combo)
+        self.date_time_layout.addStretch(1)  # Добавляем растягивающийся элемент
         self.date_time_layout.addWidget(self.update_button)
-        self.layout.addLayout(self.date_time_layout)
+        self.controls_layout.addLayout(self.date_time_layout)
+
+        self.layout.addWidget(self.controls_widget)
 
         # Map view
         self.map_view = QWebEngineView()
         self.map_view.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.layout.addWidget(self.map_view)
 
-        # Set the stretch factor for the map view to make it 80% of the total height
-        self.layout.setStretch(0, 1)  # Navigation menu
-        self.layout.setStretch(1, 1)  # Folder selection
-        self.layout.setStretch(2, 1)  # Date and time layout
-        self.layout.setStretch(3, 8)  # Map view (80% of the total height)
+        # Set the stretch factor for the map view to make it take all available space
+        self.layout.setStretch(0, 0)  # Navigation menu
+        self.layout.setStretch(1, 0)  # Controls widget
+        self.layout.setStretch(2, 1)  # Map view (will take all available space)
 
         # Hardcoded coordinates for folders (near Moscow)
         self.folder_coordinates = folder_coordinates
@@ -212,6 +258,14 @@ class MapPage(QWidget):
         data = io.BytesIO()
         m.save(data, close_file=False)
         self.map_view.setHtml(data.getvalue().decode())
+        
+        # Устанавливаем стиль для расширения карты на всю доступную область
+        self.map_view.page().runJavaScript("""
+            document.body.style.margin = '0';
+            document.body.style.padding = '0';
+            document.body.style.height = '100vh';
+            document.getElementsByTagName('div')[0].style.height = '100%';
+        """)
 
     def update_map(self):
         self.load_map()

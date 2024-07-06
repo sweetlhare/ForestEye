@@ -1,5 +1,5 @@
 import os
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QScrollArea
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QScrollArea, QSizePolicy
 from PyQt6.QtGui import QPixmap, QPainter, QPen, QColor, QFont
 from PyQt6.QtCore import Qt, QRect
 from PIL import Image
@@ -16,27 +16,61 @@ class PhotoProcessingPage(QWidget):
         self.init_ui()
 
     def init_ui(self):
-        layout = QVBoxLayout()
+        main_layout = QVBoxLayout()
+        main_layout.setContentsMargins(20, 20, 20, 20)  # Отступы от края окна
+        main_layout.setSpacing(15)  # Увеличенное расстояние между элементами
+
         self.nav_menu = NavigationMenu(self)
-        layout.addWidget(self.nav_menu)
+        main_layout.addWidget(self.nav_menu)
 
         self.photo_label = QLabel()
         self.photo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(self.photo_label)
+        self.photo_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        main_layout.addWidget(self.photo_label)
 
         self.scroll_area = QScrollArea()
         self.info_label = QLabel()
         self.info_label.setWordWrap(True)
+        self.info_label.setStyleSheet("""
+            QLabel {
+                font-size: 14px;
+                padding: 10px;
+                background-color: #f0f0f0;
+                border-radius: 5px;
+            }
+        """)
         self.scroll_area.setWidget(self.info_label)
         self.scroll_area.setWidgetResizable(True)
-        layout.addWidget(self.scroll_area)
+        self.scroll_area.setStyleSheet("""
+            QScrollArea {
+                border: none;
+                background-color: transparent;
+            }
+        """)
+        main_layout.addWidget(self.scroll_area)
 
         button_layout = QHBoxLayout()
+        button_layout.setContentsMargins(0, 10, 0, 0)  # Отступ сверху
         self.back_button = QPushButton("Назад")
+        self.back_button.setStyleSheet("""
+            QPushButton {
+                background-color: #525252;
+                color: white;
+                border: none;
+                padding: 10px 20px;
+                text-align: center;
+                text-decoration: none;
+                font-size: 16px;
+                border-radius: 8px;
+            }
+            QPushButton:hover {
+                background-color: #45a049;
+            }
+        """)
         button_layout.addWidget(self.back_button)
-        layout.addLayout(button_layout)
+        main_layout.addLayout(button_layout)
 
-        self.setLayout(layout)
+        self.setLayout(main_layout)
 
         self.back_button.clicked.connect(self.show_photo_bank_page)
 
@@ -76,7 +110,7 @@ class PhotoProcessingPage(QWidget):
             painter = QPainter(drawing_pixmap)
             painter.setPen(QPen(QColor(255, 0, 0), 2))
             font = QFont()
-            font.setPointSize(10)
+            font.setPointSize(12)  # Увеличенный размер шрифта
             painter.setFont(font)
             scale_x = scaled_pixmap.width() / pixmap.width()
             scale_y = scaled_pixmap.height() / pixmap.height()
@@ -96,27 +130,30 @@ class PhotoProcessingPage(QWidget):
         if photo_data:
             id, path, folder, upload_date, processed, scene_id, animal_count, unique_animal_count, timestamp, bbox_string = photo_data
             
-            info_text = f"<b>ID фото:</b> {id}<br>"
-            info_text += f"<b>Путь:</b> {path}<br>"
-            info_text += f"<b>Папка:</b> {folder}<br>"
-            info_text += f"<b>Дата загрузки:</b> {upload_date}<br>"
-            info_text += f"<b>Обработано:</b> {'Да' if processed else 'Нет'}<br>"
-            info_text += f"<b>ID сцены:</b> {scene_id}<br>"
-            info_text += f"<b>Количество животных:</b> {animal_count}<br>"
-            info_text += f"<b>Уникальных животных:</b> {unique_animal_count}<br>"
-            info_text += f"<b>Временная метка:</b> {timestamp}<br>"
-            info_text += f"<b>Bounding Boxes:</b><br>"
+            info_text = f"<h2>Информация о фото</h2>"
+            info_text += f"<p><b>ID фото:</b> {id}</p>"
+            info_text += f"<p><b>Путь:</b> {path}</p>"
+            info_text += f"<p><b>Папка:</b> {folder}</p>"
+            info_text += f"<p><b>Дата загрузки:</b> {upload_date}</p>"
+            info_text += f"<p><b>Обработано:</b> {'Да' if processed else 'Нет'}</p>"
+            info_text += f"<p><b>ID сцены:</b> {scene_id}</p>"
+            info_text += f"<p><b>Количество животных:</b> {animal_count}</p>"
+            info_text += f"<p><b>Уникальных животных:</b> {unique_animal_count}</p>"
+            info_text += f"<p><b>Временная метка:</b> {timestamp}</p>"
+            info_text += f"<h3>Bounding Boxes:</h3>"
             
             if bbox_string:
+                info_text += "<ul>"
                 for bbox in bbox_string.split(";"):
                     x1, y1, x2, y2, animal_id, category = bbox.split(",")
-                    info_text += f"  {category} {animal_id}: ({x1}, {y1}, {x2}, {y2})<br>"
+                    info_text += f"<li>{category} {animal_id}: ({x1}, {y1}, {x2}, {y2})</li>"
+                info_text += "</ul>"
             else:
-                info_text += "  Нет данных о bounding boxes<br>"
+                info_text += "<p>Нет данных о bounding boxes</p>"
 
             self.info_label.setText(info_text)
         else:
-            self.info_label.setText("Фото не найдено")
+            self.info_label.setText("<h2>Фото не найдено</h2>")
             self.photo_label.clear()
 
     def resizeEvent(self, event):

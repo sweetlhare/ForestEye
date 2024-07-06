@@ -1,7 +1,9 @@
 import sys
-from PyQt6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
+from PyQt6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
                              QTableWidget, QTableWidgetItem, QFileDialog, QCheckBox, QProgressDialog,
                              QLabel, QMainWindow, QStackedWidget)
+from PyQt6.QtGui import QScreen
+from PyQt6.QtCore import Qt
 from database import Database
 from photo_bank import PhotoBankPage
 from photo_processing import PhotoProcessingPage
@@ -11,7 +13,13 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Фото Анализатор")
-        self.setGeometry(100, 100, 1200, 800)
+        
+        # Получаем размер основного экрана
+        screen = QApplication.primaryScreen().availableGeometry()
+        self.setGeometry(screen)
+        
+        # Устанавливаем максимальный размер окна равным размеру экрана
+        self.setMaximumSize(screen.width(), screen.height())
 
         # Инициализация базы данных
         self.db = Database()
@@ -23,7 +31,7 @@ class MainWindow(QMainWindow):
         # Создание страниц
         self.photo_bank_page = PhotoBankPage(self.db, self.show_processing_page)
         self.photo_processing_page = PhotoProcessingPage(self.db, self.show_photo_bank_page)
-        self.map_page = MapPage(self.db)  # Новая страница с картой
+        self.map_page = MapPage(self.db)
 
         # Добавление страниц в стек
         self.stacked_widget.addWidget(self.photo_bank_page)
@@ -32,15 +40,10 @@ class MainWindow(QMainWindow):
 
         # Подключение сигналов кнопок навигации
         self.photo_bank_page.nav_menu.photo_bank_button.clicked.connect(self.show_photo_bank_page)
-        # self.photo_bank_page.nav_menu.photo_processing_button.clicked.connect(lambda: self.show_processing_page(None))
         self.photo_bank_page.nav_menu.map_button.clicked.connect(self.show_map_page)
-
         self.photo_processing_page.nav_menu.photo_bank_button.clicked.connect(self.show_photo_bank_page)
-        # self.photo_processing_page.nav_menu.photo_processing_button.clicked.connect(lambda: self.show_processing_page(None))
         self.photo_processing_page.nav_menu.map_button.clicked.connect(self.show_map_page)
-
         self.map_page.nav_menu.photo_bank_button.clicked.connect(self.show_photo_bank_page)
-        # self.map_page.nav_menu.photo_processing_button.clicked.connect(lambda: self.show_processing_page(None))
         self.map_page.nav_menu.map_button.clicked.connect(self.show_map_page)
 
         # Установка начальной страницы
@@ -55,7 +58,7 @@ class MainWindow(QMainWindow):
     def show_processing_page(self, photo_id):
         self.photo_processing_page.load_photo(photo_id)
         self.stacked_widget.setCurrentWidget(self.photo_processing_page)
-    
+
     def show_map_page(self):
         self.stacked_widget.setCurrentWidget(self.map_page)
 
@@ -63,11 +66,9 @@ class MainWindow(QMainWindow):
         self.setStyleSheet("""
             QMainWindow {
                 background-color: #f0f0f0;
-                height: 100%;
-                width: 100%;
             }
             QPushButton {
-                background-color: #4CAF50;
+                background-color: #525252;
                 color: white;
                 border: none;
                 padding: 10px 20px;

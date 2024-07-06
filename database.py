@@ -132,6 +132,54 @@ class Database:
                 'unique_animal_count': result[2]
             }]
         return []
+    
+    def get_export_data(self, folder=None):
+        query = """
+            SELECT 
+                p.folder,
+                p.bbox_string,
+                MIN(p.timestamp) as date_registration_start,
+                MAX(p.timestamp) as date_registration_end,
+                s.unique_animal_count as count
+            FROM 
+                photos p
+            JOIN 
+                scenes s ON p.scene_id = s.id
+            WHERE 
+                p.bbox_string IS NOT NULL AND p.bbox_string != ''
+        """
+        
+        if folder:
+            query += " AND p.folder = ?"
+            query += " GROUP BY p.folder, p.scene_id"
+            self.cursor.execute(query, (folder,))
+        else:
+            query += " GROUP BY p.folder, p.scene_id"
+            self.cursor.execute(query)
+        
+        results = self.cursor.fetchall()
+        
+        processed_results = []
+        for row in results:
+            folder, bbox_string, start, end, count = row
+            
+            # Extract class from bbox_string
+            bboxes = bbox_string.split(";")
+            if bboxes:
+                # Take the class from the first bounding box
+                class_name = bboxes[0].split(",")[5] if len(bboxes[0].split(",")) > 5 else "Unknown"
+            else:
+                class_name = "Unknown"
+            
+            processed_results.append((
+                folder,
+                class_name,
+                datetime.strptime(start, '%Y-%m-%d %H:%M:%S'),
+                datetime.strptime(end, '%Y-%m-%d %H:%M:%S'),
+                count
+            ))
+        
+        return processed_results
 
     def __del__(self):
         self.conn.close()
