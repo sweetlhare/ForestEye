@@ -63,6 +63,8 @@ class MainWindow(QMainWindow):
         self.setStyleSheet("""
             QMainWindow {
                 background-color: #f0f0f0;
+                height: 100%;
+                width: 100%;
             }
             QPushButton {
                 background-color: #4CAF50;

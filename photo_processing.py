@@ -1,9 +1,8 @@
 import os
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel
-from PyQt6.QtGui import QPixmap, QPainter, QPen, QColor
+from PyQt6.QtGui import QPixmap, QPainter, QPen, QColor, QFont
 from PyQt6.QtCore import Qt, QRect
-import numpy as np
-from PIL import Image, ImageQt
+from PIL import Image
 from navigation_menu import NavigationMenu
 
 class PhotoProcessingPage(QWidget):
@@ -13,13 +12,11 @@ class PhotoProcessingPage(QWidget):
         self.show_photo_bank_page = show_photo_bank_page
         self.current_photo_id = None
         self.original_pixmap = None
-        self.processed_mask = None
-        self.bbox = None
+        self.bboxes = None
         self.init_ui()
 
     def init_ui(self):
         layout = QVBoxLayout()
-
         self.nav_menu = NavigationMenu(self)
         layout.addWidget(self.nav_menu)
 
@@ -27,106 +24,78 @@ class PhotoProcessingPage(QWidget):
         self.photo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.photo_label)
 
+        self.info_label = QLabel()
+        layout.addWidget(self.info_label)
+
         button_layout = QHBoxLayout()
-        self.process_button = QPushButton("Обработать")
         self.back_button = QPushButton("Назад")
-        button_layout.addWidget(self.process_button)
         button_layout.addWidget(self.back_button)
         layout.addLayout(button_layout)
 
         self.setLayout(layout)
 
-        self.process_button.clicked.connect(self.process_photo)
         self.back_button.clicked.connect(self.show_photo_bank_page)
 
     def load_photo(self, photo_id):
         self.current_photo_id = photo_id
         photo_data = self.db.get_photo(photo_id)
         if photo_data:
-            self.original_pixmap = QPixmap(photo_data[1])
+            self.original_pixmap = QPixmap(photo_data[1])  # Assuming path is at index 1
+            self.bboxes = self.db.get_bounding_boxes(photo_id)
             self.display_photo(self.original_pixmap)
-            
-            if photo_data[5]:  # если фото уже обработано
-                self.bbox = photo_data[6:10]
-                self.load_mask()
-                self.display_processed_photo()
-            else:
-                self.bbox = None
-                self.processed_mask = None
+            self.update_info_label(photo_data)
 
     def display_photo(self, pixmap):
         scaled_width = int(self.width() * 0.8)
-        scaled_height = int(self.height() * 0.8)
-        
-        scaled_pixmap = pixmap.scaled(scaled_width, scaled_height, 
-                                      Qt.AspectRatioMode.KeepAspectRatio, 
+        scaled_height = int(self.height() * 0.6)
+        scaled_pixmap = pixmap.scaled(scaled_width, scaled_height,
+                                      Qt.AspectRatioMode.KeepAspectRatio,
                                       Qt.TransformationMode.SmoothTransformation)
-        self.photo_label.setPixmap(scaled_pixmap)
 
-    def process_photo(self):
-        if self.current_photo_id is None:
-            return
+        if self.bboxes:
+            drawing_pixmap = scaled_pixmap.copy()
+            painter = QPainter(drawing_pixmap)
+            painter.setPen(QPen(QColor(255, 0, 0), 2))
+            font = QFont()
+            font.setPointSize(10)
+            painter.setFont(font)
+            scale_x = scaled_pixmap.width() / pixmap.width()
+            scale_y = scaled_pixmap.height() / pixmap.height()
+            
+            for bbox in self.bboxes:
+                x1, y1, x2, y2, animal_id, category = bbox
+                x1 = int(x1 * scale_x)
+                y1 = int(y1 * scale_y)
+                x2 = int(x2 * scale_x)
+                y2 = int(y2 * scale_y)
+                painter.drawRect(QRect(x1, y1, x2 - x1, y2 - y1))
+                painter.drawText(x1, y1 - 5, category)
+            
+            painter.end()
+            self.photo_label.setPixmap(drawing_pixmap)
+        else:
+            self.photo_label.setPixmap(scaled_pixmap)
 
-        # Симуляция обработки фотографии нейросетью
-        self.simulate_neural_network_processing()
+    def update_info_label(self, photo_data):
+        if photo_data:
+            photo_id, path, folder, upload_date, processed, scene_id, animal_count, unique_animal_count, timestamp = photo_data
+            info_text = f"ID фото: {photo_id}\n"
+            info_text += f"Путь: {path}\n"
+            info_text += f"Папка: {folder}\n"
+            info_text += f"Дата загрузки: {upload_date}\n"
+            info_text += f"Обработано: {'Да' if processed else 'Нет'}\n"
+            info_text += f"ID сцены: {scene_id}\n"
+            info_text += f"Количество животных: {animal_count}\n"
+            info_text += f"Уникальных животных: {unique_animal_count}\n"
+            info_text += f"Временная метка: {timestamp}"
+            self.info_label.setText(info_text)
 
-        # Сохранение результатов
-        self.save_processing_results()
-
-        # Отображение результатов
-        self.display_processed_photo()
-
-    def simulate_neural_network_processing(self):
-        width = self.original_pixmap.width()
-        height = self.original_pixmap.height()
-        
-        # Создаем случайную маску сегментации
-        self.processed_mask = np.random.randint(0, 2, (height, width), dtype=np.uint8)
-
-        # Создаем случайный bounding box
-        x1 = np.random.randint(0, width // 2)
-        y1 = np.random.randint(0, height // 2)
-        x2 = np.random.randint(width // 2, width)
-        y2 = np.random.randint(height // 2, height)
-        self.bbox = (x1, y1, x2, y2)
-
-    def save_processing_results(self):
-        # Сохранение маски
-        if not os.path.exists('masks'):
-            os.makedirs('masks')
-        mask_path = f'masks/mask_{self.current_photo_id}.png'
-        Image.fromarray(self.processed_mask * 255).save(mask_path)
-
-        # Сохранение результатов в БД
-        self.db.update_photo_processing(self.current_photo_id, *self.bbox)
-
-    def load_mask(self):
-        mask_path = f'masks/mask_{self.current_photo_id}.png'
-        if os.path.exists(mask_path):
-            self.processed_mask = np.array(Image.open(mask_path)) // 255
-
-    def display_processed_photo(self):
-        if self.processed_mask is None or self.bbox is None:
-            return
-
-        image = self.original_pixmap.toImage()
-        painter = QPainter(image)
-
-        # Наложение маски сегментации
-        mask_image = Image.fromarray(self.processed_mask * 255).convert("RGBA")
-        mask_qt_image = ImageQt.ImageQt(mask_image)
-        painter.setOpacity(0.5)
-        painter.drawImage(0, 0, mask_qt_image)
-
-        # Рисование bounding box
-        painter.setOpacity(1.0)
-        painter.setPen(QPen(QColor(255, 0, 0), 100))
-        painter.drawRect(QRect(*self.bbox))
-
-        painter.end()
-
-        processed_pixmap = QPixmap.fromImage(image)
-        self.display_photo(processed_pixmap)
+            # Удалите эти две строки, так как фото уже отображается в методе display_photo
+            # pixmap = QPixmap(path)
+            # self.photo_label.setPixmap(pixmap.scaled(400, 400, Qt.AspectRatioMode.KeepAspectRatio))
+        else:
+            self.info_label.setText("Фото не найдено")
+            self.photo_label.clear()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
