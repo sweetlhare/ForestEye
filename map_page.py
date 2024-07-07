@@ -65,8 +65,8 @@ class MapPage(QWidget):
         super().__init__(parent)
         self.db = db
         self.layout = QVBoxLayout(self)
-        self.layout.setContentsMargins(20, 20, 20, 20)  # Добавляем отступы
-        self.layout.setSpacing(15)  # Увеличиваем расстояние между элементами
+        self.layout.setContentsMargins(20, 20, 20, 20)
+        self.layout.setSpacing(15)
 
         # Navigation menu
         self.nav_menu = NavigationMenu(self)
@@ -75,7 +75,7 @@ class MapPage(QWidget):
         # Создаем контейнер для элементов управления
         self.controls_widget = QWidget()
         self.controls_layout = QVBoxLayout(self.controls_widget)
-        self.controls_layout.setContentsMargins(0, 10, 0, 10)  # Добавляем отступы сверху и снизу
+        self.controls_layout.setContentsMargins(0, 10, 0, 10)
         
         # Folder selection
         self.folder_layout = QHBoxLayout()
@@ -89,7 +89,7 @@ class MapPage(QWidget):
         """)
         self.folder_combo.currentTextChanged.connect(self.update_date_time_options)
         self.folder_layout.addWidget(self.folder_combo)
-        self.folder_layout.addStretch(1)  # Добавляем растягивающийся элемент справа
+        self.folder_layout.addStretch(1)
         self.controls_layout.addLayout(self.folder_layout)
 
         # Date and Time selection
@@ -135,7 +135,7 @@ class MapPage(QWidget):
         self.date_time_layout.addWidget(self.date_combo)
         self.date_time_layout.addWidget(self.time_label)
         self.date_time_layout.addWidget(self.time_combo)
-        self.date_time_layout.addStretch(1)  # Добавляем растягивающийся элемент
+        self.date_time_layout.addStretch(1)
         self.date_time_layout.addWidget(self.update_button)
         self.controls_layout.addLayout(self.date_time_layout)
 
@@ -146,16 +146,15 @@ class MapPage(QWidget):
         self.map_view.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.layout.addWidget(self.map_view)
 
-        # Set the stretch factor for the map view to make it take all available space
-        self.layout.setStretch(0, 0)  # Navigation menu
-        self.layout.setStretch(1, 0)  # Controls widget
-        self.layout.setStretch(2, 1)  # Map view (will take all available space)
+        self.layout.setStretch(0, 0)
+        self.layout.setStretch(1, 0)
+        self.layout.setStretch(2, 1)
 
-        # Hardcoded coordinates for folders (near Moscow)
         self.folder_coordinates = folder_coordinates
 
         # Initial data load
         self.load_folders()
+        self.update_date_time_options()  # Add this line to initialize date and time options
         self.load_map()
 
     def load_folders(self):
@@ -170,16 +169,13 @@ class MapPage(QWidget):
         self.time_combo.clear()
         
         if timestamps:
-            # Update date options
             unique_dates = sorted(set(ts.date() for ts in timestamps))
             self.date_combo.addItems([date.strftime('%Y-%m-%d') for date in unique_dates])
             
-            # Update time options for the first date
             if unique_dates:
                 self.update_time_options(unique_dates[0])
             
-            # Connect date change to time update
-            self.date_combo.currentTextChanged.connect(lambda x: self.update_time_options(x))
+            self.date_combo.currentTextChanged.connect(self.update_time_options)
         else:
             print(f"No timestamps found for folder: {selected_folder}")
 
@@ -208,15 +204,11 @@ class MapPage(QWidget):
 
     def load_map(self):
         selected_folder = self.folder_combo.currentText()
-        if not selected_folder:
-            print("No folder selected")
-            return
-
         selected_date = self.date_combo.currentText()
         selected_time = self.time_combo.currentText()
 
-        if not selected_date or not selected_time:
-            print("Date or time not selected")
+        if not selected_folder or not selected_date or not selected_time:
+            print("Folder, date, or time not selected")
             return
 
         try:
@@ -227,39 +219,39 @@ class MapPage(QWidget):
             print(f"Error parsing date or time: {e}")
             return
 
-        # Create a map centered on Moscow
         m = folium.Map(location=[55.7558, 37.6173], zoom_start=10)
-
-        # Create a MarkerCluster
         marker_cluster = MarkerCluster().add_to(m)
 
-        # Get photo data for the selected folder and datetime
         photos = self.db.get_photos_for_map(selected_folder, selected_datetime)
         print(f"Photos for {selected_folder} at {selected_datetime}: {photos}")
 
-        for photo in photos:
-            folder = photo['folder'].split('/')[-1]
-            if folder in self.folder_coordinates:
-                lat, lon = self.folder_coordinates[folder]
-                print(f"Adding marker for folder {folder} at {lat}, {lon}")
-                popup_text = f"Folder: {folder}<br>Animals: {photo['animal_count']}<br>Unique animals: {photo['unique_animal_count']}"
-                folium.Marker(
-                    [lat, lon], 
-                    popup=popup_text,
-                    icon=folium.Icon(color='red', icon='info-sign')
-                ).add_to(marker_cluster)
-            else:
-                print(f"Warning: No coordinates found for folder {folder}")
-        
         if not photos:
             print(f"No photos found for {selected_folder} at {selected_datetime}")
+            # Add a message to the map when no data is available
+            folium.Marker(
+                [55.7558, 37.6173],
+                popup="No data available for the selected date and time",
+                icon=folium.Icon(color='red', icon='info-sign')
+            ).add_to(m)
+        else:
+            for photo in photos:
+                folder = photo['folder'].split('/')[-1]
+                if folder in self.folder_coordinates:
+                    lat, lon = self.folder_coordinates[folder]
+                    print(f"Adding marker for folder {folder} at {lat}, {lon}")
+                    popup_text = f"Folder: {folder}<br>Animals: {photo['animal_count']}<br>Unique animals: {photo['unique_animal_count']}"
+                    folium.Marker(
+                        [lat, lon], 
+                        popup=popup_text,
+                        icon=folium.Icon(color='red', icon='info-sign')
+                    ).add_to(marker_cluster)
+                else:
+                    print(f"Warning: No coordinates found for folder {folder}")
 
-        # Save map to data string
         data = io.BytesIO()
         m.save(data, close_file=False)
         self.map_view.setHtml(data.getvalue().decode())
         
-        # Устанавливаем стиль для расширения карты на всю доступную область
         self.map_view.page().runJavaScript("""
             document.body.style.margin = '0';
             document.body.style.padding = '0';
