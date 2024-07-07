@@ -4,6 +4,9 @@ ForestEye - это приложение на PyQt6 для обработки и 
 
 Сделано командой компании **[MooMind](moomind.tech).**
 
+Ссылка на скринкаст https://disk.yandex.ru/i/_UdMwpNrfAw7IA.
+
+
 ![alt text](assets/demo.jpeg)
 
 ## Основные функции
