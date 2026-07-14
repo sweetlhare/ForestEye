@@ -1,3 +1,5 @@
+> **In English:** A PyQt6 desktop app for processing wildlife camera-trap photos: YOLO-based animal detection, grouping shots into scenes, map visualization, and CSV/XLSX export. Includes model-training notebooks. *(Full description in Russian below.)*
+
 # ForestEye
 
 ForestEye - это приложение на PyQt6 для обработки и анализа фотографий с животными. Оно позволяет загружать фотографии, обнаруживать животных на них, группировать фотографии по сценам и визуализировать результаты на карте.
